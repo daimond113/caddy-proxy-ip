@@ -100,8 +100,72 @@ func (p *ProxyIp) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	return nil
 }
 
+type MatchProxyIp struct {
+	Ranges []string `json:"ranges,omitempty"`
+
+	cidrs []*net.IPNet
+}
+
+func (MatchProxyIp) CaddyModule() caddy.ModuleInfo {
+	return caddy.ModuleInfo{
+		ID:  "http.matchers.proxy_ip",
+		New: func() caddy.Module { return new(MatchProxyIp) },
+	}
+}
+
+func (m *MatchProxyIp) Provision(ctx caddy.Context) error {
+	for _, r := range m.Ranges {
+		if _, cidr, err := net.ParseCIDR(r); err == nil {
+			m.cidrs = append(m.cidrs, cidr)
+		} else if ip := net.ParseIP(r); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			m.cidrs = append(m.cidrs, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		}
+	}
+	return nil
+}
+
+func (m MatchProxyIp) MatchWithError(r *http.Request) (bool, error) {
+	proxyIp, ok := r.Context().Value(ctxKey{}).(string)
+	if !ok || proxyIp == "" {
+		return len(m.Ranges) == 0, nil
+	}
+
+	ip := net.ParseIP(proxyIp)
+	if ip == nil {
+		return false, nil
+	}
+
+	for _, cidr := range m.cidrs {
+		if cidr.Contains(ip) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (m *MatchProxyIp) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	for d.Next() {
+		for d.NextArg() {
+			m.Ranges = append(m.Ranges, d.Val())
+		}
+		for d.NextBlock(0) {
+			m.Ranges = append(m.Ranges, d.Val())
+		}
+	}
+	return nil
+}
+
 var (
 	_ caddy.Provisioner           = (*ProxyIp)(nil)
 	_ caddyhttp.MiddlewareHandler = (*ProxyIp)(nil)
 	_ caddyfile.Unmarshaler       = (*ProxyIp)(nil)
+
+	_ caddy.Provisioner                 = (*MatchProxyIp)(nil)
+	_ caddyhttp.RequestMatcherWithError = (*MatchProxyIp)(nil)
+	_ caddyfile.Unmarshaler             = (*MatchProxyIp)(nil)
 )
