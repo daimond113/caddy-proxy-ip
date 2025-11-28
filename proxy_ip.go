@@ -17,6 +17,7 @@ func init() {
 	caddy.RegisterModule(ProxyIp{})
 	httpcaddyfile.RegisterHandlerDirective("proxy_ip", parseCaddyfile)
 	httpcaddyfile.RegisterDirectiveOrder("proxy_ip", httpcaddyfile.Before, "rewrite")
+	caddy.RegisterModule(MatchProxyIp{})
 }
 
 type ctxKey struct{}
@@ -39,15 +40,15 @@ func (p *ProxyIp) Provision(ctx caddy.Context) error {
 
 	for _, srv := range app.Servers {
 		srv.RegisterConnContext(func(ctx context.Context, c net.Conn) context.Context {
-			proxyIP := extractProxyIP(c)
-			return context.WithValue(ctx, ctxKey{}, proxyIP)
+			proxyIp := extractProxyIp(c)
+			return context.WithValue(ctx, ctxKey{}, proxyIp)
 		})
 	}
 
 	return nil
 }
 
-func extractProxyIP(c net.Conn) string {
+func extractProxyIp(c net.Conn) string {
 	const maxDepth = 10
 	for range maxDepth {
 		if pc, ok := c.(*goproxy.Conn); ok {
@@ -80,8 +81,8 @@ func extractProxyIP(c net.Conn) string {
 }
 
 func (p ProxyIp) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	if proxyIP, ok := r.Context().Value(ctxKey{}).(string); ok && proxyIP != "" {
-		caddyhttp.SetVar(r.Context(), "proxy_ip", proxyIP)
+	if proxyIp, ok := r.Context().Value(ctxKey{}).(string); ok && proxyIp != "" {
+		caddyhttp.SetVar(r.Context(), "proxy_ip", proxyIp)
 	}
 	return next.ServeHTTP(w, r)
 }
